@@ -1,5 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
+#include <vma/vk_mem_alloc.h>
 
 namespace mv::vk
 {
@@ -36,10 +37,13 @@ namespace mv::vk
 
 		void create_logical_device();
 
+		void create_vma_allocator();
+
 		Context& m_context;
 		
 		VkPhysicalDevice m_physical{ VK_NULL_HANDLE };
 		VkDevice m_logical{ VK_NULL_HANDLE };
+		VmaAllocator m_allocator{ VK_NULL_HANDLE };
 
 		uint32_t m_graphics_queue_index{};
 		uint32_t m_present_queue_index{};

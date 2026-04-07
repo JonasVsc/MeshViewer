@@ -2,6 +2,9 @@
 #include "Context.h"
 #include "Common.h"
 
+#define VMA_IMPLEMENTATION
+#include <vma/vk_mem_alloc.h>
+
 #include <vector>
 #include <array>
 
@@ -15,10 +18,13 @@ namespace mv::vk
 		find_queue_family_indices();
 
 		create_logical_device();
+
+		create_vma_allocator();
 	}
 
 	Device::~Device()
 	{
+		vmaDestroyAllocator(m_allocator);
 		vkDestroyDevice(m_logical, nullptr);
 	}
 
@@ -122,6 +128,19 @@ namespace mv::vk
 
 		vkGetDeviceQueue(m_logical, m_graphics_queue_index, 0, &m_graphics_queue);
 		vkGetDeviceQueue(m_logical, m_present_queue_index, 0, &m_present_queue);
+	}
+
+	void Device::create_vma_allocator()
+	{
+		VmaAllocatorCreateInfo allocator_ci
+		{
+			.physicalDevice = m_physical,
+			.device = m_logical,
+			.instance = m_context.instance(),
+			.vulkanApiVersion = VK_API_VERSION_1_3,
+		};
+
+		VK_CHECK(vmaCreateAllocator(&allocator_ci, &m_allocator));
 	}
 
 } // namespace mv::vk

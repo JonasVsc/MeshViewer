@@ -1,5 +1,5 @@
 #pragma once
-#include "Assert.h"
+#include "Check.h"
 #include <vulkan/vk_enum_string_helper.h>
 
 #define VK_CHECK(res) \
