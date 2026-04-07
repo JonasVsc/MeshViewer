@@ -1,7 +1,10 @@
 #include "Viewer.h"
 #include "Assert.h"
+
 #include "Vulkan/Context.h"
 #include "Vulkan/Device.h"
+
+#include "Renderer.h"
 
 #include <SDL3/SDL.h>
 
@@ -16,7 +19,10 @@ namespace mv
 		FATAL_CHECK(m_window, "Failed to initialize window");
 
 		m_vkcontext = std::make_unique<vk::Context>(m_window);
+
 		m_vkdevice = std::make_unique<vk::Device>(*m_vkcontext);
+		
+		m_renderer = std::make_unique<Renderer>(*m_vkcontext, *m_vkdevice);
 
 		quit = false;
 	}
@@ -37,6 +43,12 @@ namespace mv
 				{
 					quit = true;
 				}
+			}
+
+			if (m_renderer->begin_frame())
+			{
+				m_renderer->begin_rendering();
+				m_renderer->end_frame();
 			}
 		}
 	}

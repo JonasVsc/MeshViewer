@@ -19,6 +19,15 @@ namespace mv::vk
 
 		~Device();
 
+		VkPhysicalDevice physical() const { return m_physical; }
+		VkDevice logical() const { return m_logical; }
+
+		uint32_t graphics_queue_index() const { return m_graphics_queue_index; }
+		uint32_t present_queue_index() const { return m_present_queue_index; }
+
+		VkQueue graphics_queue() const { return m_graphics_queue; }
+		VkQueue present_queue() const { return m_present_queue; }
+
 	private:
 
 		void select_physical_device();

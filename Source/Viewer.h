@@ -11,6 +11,8 @@ namespace mv
 		class Device;
 	}
 
+	class Renderer;
+
 	class Viewer
 	{
 	public:
@@ -35,6 +37,7 @@ namespace mv
 
 		std::unique_ptr<vk::Context> m_vkcontext;
 		std::unique_ptr<vk::Device> m_vkdevice;
+		std::unique_ptr<Renderer> m_renderer;
 
 	}; // class Viewer
 
