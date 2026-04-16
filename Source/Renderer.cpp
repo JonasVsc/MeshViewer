@@ -88,6 +88,8 @@ namespace mv
 
 	bool Renderer::begin_frame()
 	{
+		if (is_window_minimized()) return false;
+
 		auto& frame = m_frames[m_current_frame];
 
 		vkWaitForFences(m_device.logical(), 1, &frame.in_flight_fence, VK_TRUE, UINT64_MAX);
@@ -96,8 +98,8 @@ namespace mv
 
 		if (result == VK_ERROR_OUT_OF_DATE_KHR)
 		{
-			// RESIZE
-			// RETURN
+			resize();
+			return false;
 		}
 		else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
 		{
@@ -186,7 +188,7 @@ namespace mv
 
 		if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR)
 		{
-			// resize();
+			resize();
 		}
 		else if (res != VK_SUCCESS)
 		{
@@ -237,6 +239,12 @@ namespace mv
 			VK_CHECK(vkCreateSemaphore(m_device.logical(), &semaphore_ci, nullptr, &frame.render_finished_semaphore));
 			VK_CHECK(vkCreateFence(m_device.logical(), &fence_ci, nullptr, &frame.in_flight_fence));
 		}
+	}
+
+	void Renderer::resize()
+	{
+		vkDeviceWaitIdle(m_device.logical());
+		m_swapchain.recreate();
 	}
 
 } // namespace mv

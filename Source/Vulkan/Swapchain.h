@@ -16,6 +16,8 @@ namespace mv::vk
 		Swapchain(Context& context, Device& device);
 		~Swapchain();
 
+		void recreate();
+
 		VkSwapchainKHR handle() const { return m_swapchain; }
 		VkImage image(uint32_t i) const { return m_images[i]; }
 		VkImageView view(uint32_t i) const { return m_views[i]; }

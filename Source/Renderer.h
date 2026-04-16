@@ -28,9 +28,14 @@ namespace mv
 
 		void end_frame();
 
+		void set_window_minimized(bool v) { m_window_minimized = v; }
+		bool is_window_minimized() const { return m_window_minimized; }
+
 	private:
 
 		void setup();
+
+		void resize();
 
 		struct Frame
 		{
@@ -50,6 +55,7 @@ namespace mv
 
 		uint32_t m_current_frame{};
 		uint32_t m_current_image{};
+		bool m_window_minimized{};
 
 	}; // class Renderer
 
