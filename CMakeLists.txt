@@ -5,10 +5,11 @@ project("MeshViewer"
         DESCRIPTION "Vulkan Mesh Viewer"
         LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
+
+add_subdirectory(ThirdParty/SDL)
 
 find_package(Vulkan REQUIRED)
-add_subdirectory(ThirdParty/SDL)
 
 file(GLOB_RECURSE SOURCE LIST_DIRECTORIES false CONFIGURE_DEPENDS "Source/*.cpp")
 
@@ -22,4 +23,8 @@ target_link_libraries(${PROJECT_NAME}
         Vulkan::Vulkan
 )
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE MV_DEBUG)
+target_compile_definitions(${PROJECT_NAME} 
+    PUBLIC
+        VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+        VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
+)
