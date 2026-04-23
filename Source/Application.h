@@ -20,6 +20,11 @@ namespace mv
 			"VK_LAYER_KHRONOS_validation"
 		};
 
+		std::vector<const char*> required_device_extensions
+		{
+			vk::KHRSwapchainExtensionName
+		};
+
 		Application() = default;
 
 		void run();
@@ -33,8 +38,11 @@ namespace mv
 
 		void setup_debug_messenger();
 		void create_instance();
+		void pick_physical_device();
+		void create_logical_device();
 
 		std::vector<const char*> get_required_instance_extensions();
+		bool is_device_suitable(const vk::raii::PhysicalDevice& physical_device);
 
 		bool m_running{ false };
 
@@ -43,6 +51,11 @@ namespace mv
 		vk::raii::Context m_context;
 		vk::raii::Instance m_instance{ nullptr };
 		vk::raii::DebugUtilsMessengerEXT debug_messenger{ nullptr };
+		vk::raii::PhysicalDevice m_physical_device{ nullptr };
+		vk::raii::Device m_device{ nullptr };
+		vk::raii::Queue m_graphics_queue{ nullptr };
+
+		uint32_t m_graphics_queue_index{ 0 };
 
 	}; // class Application
 
