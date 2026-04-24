@@ -58,6 +58,9 @@ namespace mv
 		create_swapchain();
 		create_image_views();
 		create_graphics_pipeline();
+		create_command_pool();
+		create_command_buffer();
+		create_sync_objects();
 	}
 
 	void Application::main_loop()
@@ -72,7 +75,54 @@ namespace mv
 					m_running = false;
 				}
 			}
+
+			draw_frame();
 		}
+
+		m_device.waitIdle();
+	}
+
+	void Application::draw_frame()
+	{
+		auto fence_result = m_device.waitForFences(*m_draw_fence, vk::True, UINT64_MAX);
+		if (fence_result != vk::Result::eSuccess)
+		{
+			throw std::runtime_error("failed to wait for fence");
+		}
+
+		m_device.resetFences(*m_draw_fence);
+
+		auto [result, image_index] = m_swapchain.acquireNextImage(UINT64_MAX, *m_present_complete_semaphore, nullptr);
+
+		record_command_buffer(image_index);
+
+		m_queue.waitIdle();
+
+		vk::PipelineStageFlags wait_destination_stage_mask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
+
+		const vk::SubmitInfo submit_info
+		{
+			.waitSemaphoreCount = 1,
+			.pWaitSemaphores = &*m_present_complete_semaphore,
+			.pWaitDstStageMask = &wait_destination_stage_mask,
+			.commandBufferCount = 1,
+			.pCommandBuffers = &*m_command_buffer,
+			.signalSemaphoreCount = 1,
+			.pSignalSemaphores = &*m_render_finished_semaphore
+		};
+
+		m_queue.submit(submit_info, *m_draw_fence);
+
+		const vk::PresentInfoKHR present_info
+		{
+			.waitSemaphoreCount = 1,
+			.pWaitSemaphores = &*m_render_finished_semaphore,
+			.swapchainCount = 1,
+			.pSwapchains = &*m_swapchain,
+			.pImageIndices = &image_index
+		};
+
+		result = m_queue.presentKHR(present_info);
 	}
 
 	void Application::cleanup()
@@ -86,21 +136,21 @@ namespace mv
 		if (!enable_validation_layers)
 			return;
 
-		vk::DebugUtilsMessageSeverityFlagsEXT severity_flags(vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose | 
-															 vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo | 
-															 vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-															 vk::DebugUtilsMessageSeverityFlagBitsEXT::eError);
+		vk::DebugUtilsMessageSeverityFlagsEXT severity_flags(vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eError);
 
-		vk::DebugUtilsMessageTypeFlagsEXT message_type_flags(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | 
-															 vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance | 
-															 vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-															 vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding);
-		
+		vk::DebugUtilsMessageTypeFlagsEXT message_type_flags(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+			vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
+			vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+			vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding);
+
 		vk::DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT
-		{ 
+		{
 			.messageSeverity = severity_flags,
 			.messageType = message_type_flags,
-			.pfnUserCallback = &debug_callback 
+			.pfnUserCallback = &debug_callback
 		};
 		debug_messenger = m_instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
 	}
@@ -108,12 +158,12 @@ namespace mv
 	void Application::create_instance()
 	{
 		constexpr vk::ApplicationInfo app_info
-		{ 
+		{
 			.pApplicationName = "MeshViewer",
 			.applicationVersion = VK_MAKE_VERSION(1, 0, 0),
 			.pEngineName = "No Engine",
 			.engineVersion = VK_MAKE_VERSION(1, 0, 0),
-			.apiVersion = vk::ApiVersion14 
+			.apiVersion = vk::ApiVersion14
 		};
 
 		std::vector<const char*> required_layers;
@@ -123,15 +173,15 @@ namespace mv
 		}
 
 		auto layer_properties = m_context.enumerateInstanceLayerProperties();
-		auto unsupported_layer_it = 
-			std::ranges::find_if(required_layers, 
-				[&layer_properties](auto const& required_layer) 
+		auto unsupported_layer_it =
+			std::ranges::find_if(required_layers,
+				[&layer_properties](auto const& required_layer)
 				{
 					return std::ranges::none_of(layer_properties,
-					[required_layer](auto const& layerProperty) 
-					{ 
-						return strcmp(layerProperty.layerName, required_layer) == 0; 
-					});
+						[required_layer](auto const& layerProperty)
+						{
+							return strcmp(layerProperty.layerName, required_layer) == 0;
+						});
 				});
 
 		if (unsupported_layer_it != required_layers.end())
@@ -142,15 +192,15 @@ namespace mv
 		auto required_extensions = get_required_instance_extensions();
 
 		auto extension_properties = m_context.enumerateInstanceExtensionProperties();
-		auto unsupported_property_it = 
+		auto unsupported_property_it =
 			std::ranges::find_if(required_extensions,
 				[&extension_properties](auto const& required_extension)
 				{
 					return std::ranges::none_of(extension_properties,
-					[required_extension](auto const& extension_property)
-					{
-						return strcmp(extension_property.extensionName, required_extension) == 0;
-					});
+						[required_extension](auto const& extension_property)
+						{
+							return strcmp(extension_property.extensionName, required_extension) == 0;
+						});
 				});
 
 		if (unsupported_property_it != required_extensions.end())
@@ -217,19 +267,25 @@ namespace mv
 			throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
 		}
 
+		// query for Vulkan 1.3 features
+		vk::StructureChain<vk::PhysicalDeviceFeatures2,
+						   vk::PhysicalDeviceVulkan11Features,
+						   vk::PhysicalDeviceVulkan13Features,
+						   vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>
+		feature_chain
+		{
+				{},                                                          // vk::PhysicalDeviceFeatures2
+				{.shaderDrawParameters = true},                              // vk::PhysicalDeviceVulkan11Features
+				{.synchronization2 = true, .dynamicRendering = true},        // vk::PhysicalDeviceVulkan13Features
+				{.extendedDynamicState = true}                               // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+		};
+
 		float queue_priority = 0.5f;
 		vk::DeviceQueueCreateInfo device_queue_ci
 		{
 			.queueFamilyIndex = queue_index,
 			.queueCount = 1,
 			.pQueuePriorities = &queue_priority
-		};
-
-		vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain
-		{
-			{},
-			{ .dynamicRendering = true },
-			{ .extendedDynamicState = true }
 		};
 
 		vk::DeviceCreateInfo device_ci
@@ -242,8 +298,9 @@ namespace mv
 		};
 
 		m_device = vk::raii::Device(m_physical_device, device_ci);
-	
-		m_graphics_queue = vk::raii::Queue(m_device, queue_index, 0);
+
+		m_queue = vk::raii::Queue(m_device, queue_index, 0);
+		m_queue_index = queue_index;
 	}
 
 	void Application::create_swapchain()
@@ -377,6 +434,36 @@ namespace mv
 		m_graphics_pipeline = vk::raii::Pipeline(m_device, nullptr, pipeline_chain_ci.get<vk::GraphicsPipelineCreateInfo>());
 	}
 
+	void Application::create_command_pool()
+	{
+		vk::CommandPoolCreateInfo cmd_pool_ci
+		{ 
+			.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+			.queueFamilyIndex = m_queue_index 
+		};
+
+		m_command_pool = vk::raii::CommandPool(m_device, cmd_pool_ci);
+	}
+
+	void Application::create_command_buffer()
+	{
+		vk::CommandBufferAllocateInfo alloc_info
+		{
+			.commandPool = m_command_pool,
+			.level = vk::CommandBufferLevel::ePrimary,
+			.commandBufferCount = 1
+		};
+
+		m_command_buffer = std::move(vk::raii::CommandBuffers(m_device, alloc_info).front());
+	}
+
+	void Application::create_sync_objects()
+	{
+		m_present_complete_semaphore = vk::raii::Semaphore(m_device, vk::SemaphoreCreateInfo());
+		m_render_finished_semaphore = vk::raii::Semaphore(m_device, vk::SemaphoreCreateInfo());
+		m_draw_fence = vk::raii::Fence(m_device, vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+	}
+
 	std::vector<const char*> Application::get_required_instance_extensions()
 	{
 		uint32_t SDL_ExtensionCount;
@@ -417,9 +504,16 @@ namespace mv
 			});
 
 		// check if the physical device supports the required features (dynamic rendering and extended dynamic state)
-		auto features = physical_device.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
-		bool support_required_features = features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+		auto features = physical_device.template getFeatures2<vk::PhysicalDeviceFeatures2, 
+															  vk::PhysicalDeviceVulkan11Features, 
+															  vk::PhysicalDeviceVulkan13Features, 
+															  vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+
+		bool support_required_features = features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
+										 features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+										 features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
 										 features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
+
 
 		return supports_vulkan1_3 && support_graphics && support_all_required_extensions && support_required_features;
 	}
@@ -487,7 +581,93 @@ namespace mv
 		return shader_module;
 	}
 
-	
+	void Application::record_command_buffer(uint32_t image_index)
+	{
+		m_command_buffer.begin({});
+
+		transition_image_layout(
+			image_index,
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+		);
+
+		vk::ClearValue clear_color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
+		vk::RenderingAttachmentInfo attachment_info
+		{
+			.imageView = m_swapchain_image_views[image_index],
+			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eStore,
+			.clearValue = clear_color
+		};
+
+		vk::RenderingInfo rendering_info
+		{
+			.renderArea = { .offset = {0,0}, .extent = m_swapchain_extent },
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &attachment_info
+		};
+
+		m_command_buffer.beginRendering(rendering_info);
+
+		m_command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphics_pipeline);
+
+		m_command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<uint32_t>(m_swapchain_extent.width), static_cast<uint32_t>(m_swapchain_extent.height), 0.0f, 1.0f));
+		m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_swapchain_extent));
+
+		m_command_buffer.draw(3, 1, 0, 0);
+
+		m_command_buffer.endRendering();
+
+		transition_image_layout(
+			image_index,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			vk::ImageLayout::ePresentSrcKHR,
+			vk::AccessFlagBits2::eColorAttachmentWrite,             
+			{},                                                     
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,     
+			vk::PipelineStageFlagBits2::eBottomOfPipe               
+		);
+
+		m_command_buffer.end();
+
+	}
+
+	void Application::transition_image_layout(uint32_t image_index, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask)
+	{
+		vk::ImageMemoryBarrier2 barrier = 
+		{
+			.srcStageMask = src_stage_mask,
+			.srcAccessMask = src_access_mask,
+			.dstStageMask = dst_stage_mask,
+			.dstAccessMask = dst_access_mask,
+			.oldLayout = old_layout,
+			.newLayout = new_layout,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_swapchain_images[image_index],
+			.subresourceRange = {
+				   .aspectMask = vk::ImageAspectFlagBits::eColor,
+				   .baseMipLevel = 0,
+				   .levelCount = 1,
+				   .baseArrayLayer = 0,
+				   .layerCount = 1
+			} 
+		};
+		vk::DependencyInfo dependency_info
+		{
+			.dependencyFlags = {},
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrier 
+		};
+
+		m_command_buffer.pipelineBarrier2(dependency_info);
+	}
 
 	static VKAPI_ATTR vk::Bool32 VKAPI_CALL debug_callback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void*)
 	{
