@@ -23,7 +23,7 @@ struct FrameData
 ConstantBuffer<FrameData> Frame;
 
 [shader("vertex")]
-VSOutput VertexMain(VSInput Input)
+VSOutput vertMain(VSInput Input)
 {
     VSOutput Output;
 
@@ -35,7 +35,7 @@ VSOutput VertexMain(VSInput Input)
 }
 
 [shader("fragment")]
-float4 FragmentMain(VSOutput Input) : SV_Target
+float4 fragMain(VSOutput Input) : SV_Target
 {
     float4 Output;
 

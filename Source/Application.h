@@ -43,6 +43,7 @@ namespace mv
 		void create_logical_device();
 		void create_swapchain();
 		void create_image_views();
+		void create_graphics_pipeline();
 
 		std::vector<const char*> get_required_instance_extensions();
 		bool is_device_suitable(const vk::raii::PhysicalDevice& physical_device);
@@ -50,7 +51,8 @@ namespace mv
 		vk::PresentModeKHR choose_swap_present_mode(std::span<const vk::PresentModeKHR> available_present_modes);
 		vk::Extent2D choose_swap_extent(const vk::SurfaceCapabilitiesKHR& capabilities);
 		uint32_t choose_swap_min_image_count(const vk::SurfaceCapabilitiesKHR& capabilities);
-
+		[[nodiscard]] vk::raii::ShaderModule create_shader_module(const std::vector<char>& code) const;
+		
 		bool m_running{ false };
 
 		SDL_Window* m_window{ nullptr };
@@ -68,6 +70,9 @@ namespace mv
 		std::vector<vk::raii::ImageView> m_swapchain_image_views;
 		vk::Extent2D m_swapchain_extent{};
 		vk::SurfaceFormatKHR m_swapchain_surface_format{};
+
+		vk::raii::PipelineLayout m_pipeline_layout{ nullptr };
+		vk::raii::Pipeline m_graphics_pipeline{ nullptr };
 
 	}; // class Application
 
