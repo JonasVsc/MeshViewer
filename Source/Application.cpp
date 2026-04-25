@@ -1,8 +1,10 @@
 #include "Application.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <iostream>
 #include <fstream>
+#include <chrono>
 #include <map>
 
 namespace mv
@@ -57,10 +59,14 @@ namespace mv
 		create_logical_device();
 		create_swapchain();
 		create_image_views();
+		create_descriptor_set_layout();
 		create_graphics_pipeline();
 		create_command_pool();
 		create_vertex_buffer();
 		create_index_buffer();
+		create_uniform_buffers();
+		create_descriptor_pool();
+		create_descriptor_sets();
 		create_command_buffers();
 		create_sync_objects();
 	}
@@ -117,6 +123,8 @@ namespace mv
 		{
 			throw std::runtime_error("failed to acquire swap chain image");
 		}
+
+		update_uniform_buffer(m_frame_index);
 
 		m_device.resetFences(*m_in_flight_fences[m_frame_index]);
 
@@ -391,6 +399,13 @@ namespace mv
 		}
 	}
 
+	void Application::create_descriptor_set_layout()
+	{
+		vk::DescriptorSetLayoutBinding ubo_layout_binding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr);
+		vk::DescriptorSetLayoutCreateInfo layout_ci	{ .bindingCount = 1, .pBindings = &ubo_layout_binding };
+		m_descriptor_set_layout = vk::raii::DescriptorSetLayout(m_device, layout_ci);
+	}
+
 	void Application::create_graphics_pipeline()
 	{
 		vk::raii::ShaderModule shader_module = create_shader_module(read_file("Shaders/tutorial.spv"));
@@ -431,7 +446,7 @@ namespace mv
 			.rasterizerDiscardEnable = vk::False,
 			.polygonMode = vk::PolygonMode::eFill,
 			.cullMode = vk::CullModeFlagBits::eBack,
-			.frontFace = vk::FrontFace::eClockwise,
+			.frontFace = vk::FrontFace::eCounterClockwise,
 			.depthBiasEnable = vk::False,
 			.lineWidth = 1.0f
 		};
@@ -455,8 +470,7 @@ namespace mv
 		vk::PipelineColorBlendStateCreateInfo pipeline_color_blending{ .logicOpEnable = vk::False, .logicOp = vk::LogicOp::eCopy, .attachmentCount = 1, .pAttachments = &color_blend_attachment };
 	
 		// pipeline layout
-		vk::PipelineLayoutCreateInfo layout_ci{ .setLayoutCount = 0, .pushConstantRangeCount = 0 };
-
+		vk::PipelineLayoutCreateInfo layout_ci{ .setLayoutCount = 1, .pSetLayouts = &*m_descriptor_set_layout };
 		m_pipeline_layout = vk::raii::PipelineLayout(m_device, layout_ci);
 
 		vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipeline_chain_ci
@@ -545,6 +559,60 @@ namespace mv
 		copy_buffer(staging_buffer, m_index_buffer, buffer_size);
 	}
 
+	void Application::create_uniform_buffers()
+	{
+		vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+		{
+			vk::raii::Buffer buffer{ nullptr };
+			vk::raii::DeviceMemory memory{ nullptr };
+
+			create_buffer(
+				buffer_size,
+				vk::BufferUsageFlagBits::eUniformBuffer,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+				buffer,
+				memory
+			);
+
+			m_uniform_buffers.emplace_back(std::move(buffer));
+			m_uniform_buffers_memory.emplace_back(std::move(memory));
+			m_uniform_buffers_mapped.emplace_back(m_uniform_buffers_memory[i].mapMemory(0, buffer_size));
+		}
+	}
+
+	void Application::create_descriptor_pool()
+	{
+		vk::DescriptorPoolSize pool_size(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT);
+		vk::DescriptorPoolCreateInfo pool_ci{ .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, .maxSets = MAX_FRAMES_IN_FLIGHT, .poolSizeCount = 1, .pPoolSizes = &pool_size };
+	
+		m_descriptor_pool = vk::raii::DescriptorPool(m_device, pool_ci);
+	}
+
+	void Application::create_descriptor_sets()
+	{
+		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *m_descriptor_set_layout);
+		vk::DescriptorSetAllocateInfo set_alloc_info{ .descriptorPool = m_descriptor_pool, .descriptorSetCount = static_cast<uint32_t>(layouts.size()), .pSetLayouts = layouts.data() };
+		m_descriptor_sets = m_device.allocateDescriptorSets(set_alloc_info);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+		{
+			vk::DescriptorBufferInfo buffer_info{ .buffer = m_uniform_buffers[i], .offset = 0, .range = sizeof(UniformBufferObject) };
+			vk::WriteDescriptorSet descriptor_write
+			{
+				.dstSet = m_descriptor_sets[i],
+				.dstBinding = 0,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = vk::DescriptorType::eUniformBuffer,
+				.pBufferInfo = &buffer_info
+			};
+
+			m_device.updateDescriptorSets(descriptor_write, {});
+		}
+	}
+
 	void Application::create_command_buffers()
 	{
 		vk::CommandBufferAllocateInfo alloc_info
@@ -593,6 +661,21 @@ namespace mv
 	{
 		m_swapchain_image_views.clear();
 		m_swapchain = nullptr;
+	}
+
+	void Application::update_uniform_buffer(uint32_t current_image)
+	{
+		static auto start_time = std::chrono::high_resolution_clock::now();
+		auto current_time = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
+
+		UniformBufferObject ubo{};
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(m_swapchain_extent.width) / static_cast<float>(m_swapchain_extent.height), 0.1f, 10.0f);
+		ubo.proj[1][1] *= -1;
+	
+		memcpy(m_uniform_buffers_mapped[current_image], &ubo, sizeof(ubo));
 	}
 
 	std::vector<const char*> Application::get_required_instance_extensions()
@@ -755,6 +838,8 @@ namespace mv
 
 		command_buffer.bindVertexBuffers(0, *m_vertex_buffer, { 0 });
 		command_buffer.bindIndexBuffer(*m_index_buffer, 0, vk::IndexType::eUint16);
+
+		command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_pipeline_layout, 0, *m_descriptor_sets[m_frame_index], nullptr);
 
 		command_buffer.drawIndexed(m_indices.size(), 1, 0, 0, 0);
 

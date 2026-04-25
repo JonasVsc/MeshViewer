@@ -16,6 +16,13 @@ namespace mv
 		static std::array<vk::VertexInputAttributeDescription, 2> get_attribute_descriptions();
 	};
 
+	struct UniformBufferObject 
+	{
+		glm::mat4 model;
+		glm::mat4 view;
+		glm::mat4 proj;
+	};
+
 	class Application
 	{
 	public:
@@ -57,14 +64,19 @@ namespace mv
 		void create_logical_device();
 		void create_swapchain();
 		void create_image_views();
+		void create_descriptor_set_layout();
 		void create_graphics_pipeline();
 		void create_command_pool();
 		void create_vertex_buffer();
 		void create_index_buffer();
+		void create_uniform_buffers();
+		void create_descriptor_pool();
+		void create_descriptor_sets();
 		void create_command_buffers();
 		void create_sync_objects();
 		void recreate_swapchain();
 		void cleanup_swapchain();
+		void update_uniform_buffer(uint32_t current_image);
 
 		std::vector<const char*> get_required_instance_extensions();
 		bool is_device_suitable(const vk::raii::PhysicalDevice& physical_device);
@@ -100,6 +112,10 @@ namespace mv
 		vk::Extent2D m_swapchain_extent{};
 		vk::SurfaceFormatKHR m_swapchain_surface_format{};
 
+		vk::raii::DescriptorSetLayout m_descriptor_set_layout{ nullptr };
+		vk::raii::DescriptorPool m_descriptor_pool{ nullptr };
+		std::vector<vk::raii::DescriptorSet> m_descriptor_sets;
+
 		vk::raii::PipelineLayout m_pipeline_layout{ nullptr };
 		vk::raii::Pipeline m_graphics_pipeline{ nullptr };
 
@@ -126,7 +142,10 @@ namespace mv
 		vk::raii::Buffer m_index_buffer{ nullptr };
 		vk::raii::DeviceMemory m_vertex_memory{ nullptr };
 		vk::raii::DeviceMemory m_index_memory{ nullptr };
-
+		
+		std::vector<vk::raii::Buffer> m_uniform_buffers;
+		std::vector<vk::raii::DeviceMemory> m_uniform_buffers_memory;
+		std::vector<void*> m_uniform_buffers_mapped;
 
 	}; // class Application
 
