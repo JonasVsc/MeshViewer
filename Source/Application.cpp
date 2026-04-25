@@ -59,6 +59,8 @@ namespace mv
 		create_image_views();
 		create_graphics_pipeline();
 		create_command_pool();
+		create_vertex_buffer();
+		create_index_buffer();
 		create_command_buffers();
 		create_sync_objects();
 	}
@@ -399,7 +401,16 @@ namespace mv
 		vk::PipelineShaderStageCreateInfo pipeline_shader_stages[] = { vert_shader_ci, frag_shader_ci };
 	
 		// vertex input
-		vk::PipelineVertexInputStateCreateInfo pipeline_vertex_Input{};
+		auto binding_description = Vertex::get_binding_description();
+		auto attribute_descriptions = Vertex::get_attribute_descriptions();
+
+		vk::PipelineVertexInputStateCreateInfo pipeline_vertex_Input
+		{
+			.vertexBindingDescriptionCount = 1,
+			.pVertexBindingDescriptions = &binding_description,
+			.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size()),
+			.pVertexAttributeDescriptions = attribute_descriptions.data()
+		};
 
 		// input assembly
 		vk::PipelineInputAssemblyStateCreateInfo pipeline_input_assembly{ .topology = vk::PrimitiveTopology::eTriangleList };
@@ -478,6 +489,60 @@ namespace mv
 		};
 
 		m_command_pool = vk::raii::CommandPool(m_device, cmd_pool_ci);
+	}
+
+	void Application::create_vertex_buffer()
+	{
+		vk::DeviceSize buffer_size = sizeof(m_vertices[0]) * m_vertices.size();
+
+		vk::raii::Buffer staging_buffer{ nullptr };
+		vk::raii::DeviceMemory staging_memory{ nullptr };
+
+		create_buffer(buffer_size,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			staging_buffer, staging_memory
+		);
+
+		void* data = staging_memory.mapMemory(0, buffer_size);
+		memcpy(data, m_vertices.data(), buffer_size);
+		staging_memory.unmapMemory();
+
+		create_buffer(buffer_size,
+			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			m_vertex_buffer, m_vertex_memory
+		);
+
+		copy_buffer(staging_buffer, m_vertex_buffer, buffer_size);
+	}
+
+	void Application::create_index_buffer()
+	{
+		vk::DeviceSize buffer_size = sizeof(m_indices[0]) * m_indices.size();
+
+		vk::raii::Buffer staging_buffer{ nullptr };
+		vk::raii::DeviceMemory staging_memory{ nullptr };
+
+		create_buffer(
+			buffer_size,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			staging_buffer, staging_memory
+		);
+
+		void* data = staging_memory.mapMemory(0, buffer_size);
+		memcpy(data, m_indices.data(), buffer_size);
+		staging_memory.unmapMemory();
+
+		create_buffer(
+			buffer_size,
+			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			m_index_buffer, m_index_memory
+		);
+
+		copy_buffer(staging_buffer, m_index_buffer, buffer_size);
 	}
 
 	void Application::create_command_buffers()
@@ -688,7 +753,10 @@ namespace mv
 		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<uint32_t>(m_swapchain_extent.width), static_cast<uint32_t>(m_swapchain_extent.height), 0.0f, 1.0f));
 		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_swapchain_extent));
 
-		command_buffer.draw(3, 1, 0, 0);
+		command_buffer.bindVertexBuffers(0, *m_vertex_buffer, { 0 });
+		command_buffer.bindIndexBuffer(*m_index_buffer, 0, vk::IndexType::eUint16);
+
+		command_buffer.drawIndexed(m_indices.size(), 1, 0, 0, 0);
 
 		command_buffer.endRendering();
 
@@ -737,6 +805,64 @@ namespace mv
 		m_command_buffers[m_frame_index].pipelineBarrier2(dependency_info);
 	}
 
+	uint32_t Application::find_memory_type(uint32_t type_filter, vk::MemoryPropertyFlags properties)
+	{
+		vk::PhysicalDeviceMemoryProperties mem_properties = m_physical_device.getMemoryProperties();
+
+		for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++)
+		{
+			if ((type_filter & (1 << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties)
+			{
+				return i;
+			}
+		}
+
+		throw std::runtime_error("failed to find suitable memory type");
+	}
+
+	void Application::create_buffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer& buffer, vk::raii::DeviceMemory& memory)
+	{
+		vk::BufferCreateInfo buffer_ci
+		{
+			.size = size,
+			.usage = usage,
+		};
+
+		buffer = vk::raii::Buffer(m_device, buffer_ci);
+
+		auto mem_requirements = buffer.getMemoryRequirements();
+
+		vk::MemoryAllocateInfo mem_alloc_info
+		{
+			.allocationSize = mem_requirements.size,
+			.memoryTypeIndex = find_memory_type(mem_requirements.memoryTypeBits, properties)
+		};
+
+		memory = vk::raii::DeviceMemory(m_device, mem_alloc_info);
+		buffer.bindMemory(*memory, 0);
+	}
+
+	void Application::copy_buffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size)
+	{
+		vk::CommandBufferAllocateInfo cmd_alloc_info
+		{
+			.commandPool = m_command_pool,
+			.level = vk::CommandBufferLevel::ePrimary,
+			.commandBufferCount = 1
+		};
+
+		vk::raii::CommandBuffer copy_command_buffer = std::move(m_device.allocateCommandBuffers(cmd_alloc_info).front());
+
+		copy_command_buffer.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+
+		copy_command_buffer.copyBuffer(*src_buffer, *dst_buffer, vk::BufferCopy(0, 0, size));
+
+		copy_command_buffer.end();
+
+		m_queue.submit(vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &*copy_command_buffer }, nullptr);
+		m_queue.waitIdle();
+	}
+
 	static VKAPI_ATTR vk::Bool32 VKAPI_CALL debug_callback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void*)
 	{
 		if (severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning || severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
@@ -746,5 +872,18 @@ namespace mv
 		return vk::False;
 	}
 
+
+	vk::VertexInputBindingDescription Vertex::get_binding_description()
+	{
+		return { .binding = 0, .stride = sizeof(Vertex), .inputRate = vk::VertexInputRate::eVertex };
+	}
+
+	std::array<vk::VertexInputAttributeDescription, 2> Vertex::get_attribute_descriptions()
+	{
+		return {{
+			{ .location = 0, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, position) },
+			{ .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color) }
+		}};
+	}
 
 } // namespace mv
