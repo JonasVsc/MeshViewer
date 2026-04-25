@@ -9,6 +9,8 @@ namespace mv
 	{
 	public:
 
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+
 #ifdef NDEBUG
 		static constexpr bool enable_validation_layers = false;
 #else
@@ -46,8 +48,10 @@ namespace mv
 		void create_image_views();
 		void create_graphics_pipeline();
 		void create_command_pool();
-		void create_command_buffer();
+		void create_command_buffers();
 		void create_sync_objects();
+		void recreate_swapchain();
+		void cleanup_swapchain();
 
 		std::vector<const char*> get_required_instance_extensions();
 		bool is_device_suitable(const vk::raii::PhysicalDevice& physical_device);
@@ -60,6 +64,8 @@ namespace mv
 		void transition_image_layout(uint32_t image_index, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask);
 
 		bool m_running{ false };
+		bool m_framebuffer_resized{ false };
+		bool m_framebuffer_minimized{ false };
 
 		SDL_Window* m_window{ nullptr };
 
@@ -82,10 +88,11 @@ namespace mv
 		vk::raii::Pipeline m_graphics_pipeline{ nullptr };
 
 		vk::raii::CommandPool m_command_pool{ nullptr };
-		vk::raii::CommandBuffer m_command_buffer{ nullptr };
-		vk::raii::Semaphore m_present_complete_semaphore{ nullptr };
-		vk::raii::Semaphore m_render_finished_semaphore{ nullptr };
-		vk::raii::Fence m_draw_fence{ nullptr };
+		std::vector<vk::raii::CommandBuffer> m_command_buffers;
+		std::vector<vk::raii::Semaphore> m_present_complete_semaphores;
+		std::vector<vk::raii::Semaphore> m_render_finished_semaphores;
+		std::vector<vk::raii::Fence> m_in_flight_fences;
+		uint32_t m_frame_index{ 0 };
 
 	}; // class Application
 

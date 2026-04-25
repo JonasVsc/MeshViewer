@@ -41,7 +41,7 @@ namespace mv
 		if(!SDL_Init(SDL_INIT_VIDEO))
 			throw std::runtime_error("failed to init sdl");
 
-		m_window = SDL_CreateWindow("MeshViewer", 800, 600, SDL_WINDOW_VULKAN);
+		m_window = SDL_CreateWindow("MeshViewer", 800, 600, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 		if (!m_window)
 			throw std::runtime_error("failed to create window");
 
@@ -59,7 +59,7 @@ namespace mv
 		create_image_views();
 		create_graphics_pipeline();
 		create_command_pool();
-		create_command_buffer();
+		create_command_buffers();
 		create_sync_objects();
 	}
 
@@ -74,6 +74,21 @@ namespace mv
 				{
 					m_running = false;
 				}
+				if (event.type == SDL_EVENT_WINDOW_RESIZED)
+				{
+					std::cerr << "Window resized\n";
+					m_framebuffer_resized = true;
+				}
+				if (event.type == SDL_EVENT_WINDOW_MINIMIZED)
+				{
+					std::cerr << "Window minimized\n";
+					m_framebuffer_minimized = true;
+				}
+				if (event.type == SDL_EVENT_WINDOW_RESTORED)
+				{
+					std::cerr << "Window restored\n";
+					m_framebuffer_minimized = false;
+				}
 			}
 
 			draw_frame();
@@ -84,49 +99,69 @@ namespace mv
 
 	void Application::draw_frame()
 	{
-		auto fence_result = m_device.waitForFences(*m_draw_fence, vk::True, UINT64_MAX);
+		auto fence_result = m_device.waitForFences(*m_in_flight_fences[m_frame_index], vk::True, UINT64_MAX);
 		if (fence_result != vk::Result::eSuccess)
 		{
 			throw std::runtime_error("failed to wait for fence");
 		}
 
-		m_device.resetFences(*m_draw_fence);
+		auto [result, image_index] = m_swapchain.acquireNextImage(UINT64_MAX, *m_present_complete_semaphores[m_frame_index], nullptr);
+		if (result == vk::Result::eErrorOutOfDateKHR)
+		{
+			recreate_swapchain();
+			return;
+		}
+		if ((result == vk::Result::eTimeout) || (result == vk::Result::eNotReady))
+		{
+			throw std::runtime_error("failed to acquire swap chain image");
+		}
 
-		auto [result, image_index] = m_swapchain.acquireNextImage(UINT64_MAX, *m_present_complete_semaphore, nullptr);
+		m_device.resetFences(*m_in_flight_fences[m_frame_index]);
 
+		m_command_buffers[m_frame_index].reset();
 		record_command_buffer(image_index);
 
-		m_queue.waitIdle();
-
 		vk::PipelineStageFlags wait_destination_stage_mask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
-
 		const vk::SubmitInfo submit_info
 		{
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &*m_present_complete_semaphore,
+			.pWaitSemaphores = &*m_present_complete_semaphores[m_frame_index],
 			.pWaitDstStageMask = &wait_destination_stage_mask,
 			.commandBufferCount = 1,
-			.pCommandBuffers = &*m_command_buffer,
+			.pCommandBuffers = &*m_command_buffers[m_frame_index],
 			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &*m_render_finished_semaphore
+			.pSignalSemaphores = &*m_render_finished_semaphores[image_index]
 		};
 
-		m_queue.submit(submit_info, *m_draw_fence);
+		m_queue.submit(submit_info, *m_in_flight_fences[m_frame_index]);
 
 		const vk::PresentInfoKHR present_info
 		{
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &*m_render_finished_semaphore,
+			.pWaitSemaphores = &*m_render_finished_semaphores[image_index],
 			.swapchainCount = 1,
 			.pSwapchains = &*m_swapchain,
 			.pImageIndices = &image_index
 		};
 
 		result = m_queue.presentKHR(present_info);
+		if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) || m_framebuffer_resized)
+		{
+			m_framebuffer_resized = false;
+			recreate_swapchain();
+		}
+		else
+		{
+			assert(result == vk::Result::eSuccess);
+		}
+
+		m_frame_index = (m_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
 	void Application::cleanup()
 	{
+		cleanup_swapchain();
+
 		SDL_DestroyWindow(m_window);
 		SDL_Quit();
 	}
@@ -445,23 +480,54 @@ namespace mv
 		m_command_pool = vk::raii::CommandPool(m_device, cmd_pool_ci);
 	}
 
-	void Application::create_command_buffer()
+	void Application::create_command_buffers()
 	{
 		vk::CommandBufferAllocateInfo alloc_info
 		{
 			.commandPool = m_command_pool,
 			.level = vk::CommandBufferLevel::ePrimary,
-			.commandBufferCount = 1
+			.commandBufferCount = MAX_FRAMES_IN_FLIGHT
 		};
 
-		m_command_buffer = std::move(vk::raii::CommandBuffers(m_device, alloc_info).front());
+		m_command_buffers = vk::raii::CommandBuffers(m_device, alloc_info);
 	}
 
 	void Application::create_sync_objects()
 	{
-		m_present_complete_semaphore = vk::raii::Semaphore(m_device, vk::SemaphoreCreateInfo());
-		m_render_finished_semaphore = vk::raii::Semaphore(m_device, vk::SemaphoreCreateInfo());
-		m_draw_fence = vk::raii::Fence(m_device, vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+		assert(m_present_complete_semaphores.empty() && m_render_finished_semaphores.empty() && m_in_flight_fences.empty());
+
+		for (size_t i = 0; i < m_swapchain_images.size(); i++)
+		{
+			m_render_finished_semaphores.emplace_back(m_device, vk::SemaphoreCreateInfo());
+		}
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			m_present_complete_semaphores.emplace_back(m_device, vk::SemaphoreCreateInfo());
+			m_in_flight_fences.emplace_back(m_device, vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+		}
+	}
+
+	void Application::recreate_swapchain()
+	{
+		if (m_framebuffer_minimized)
+			return;
+
+		int width, height;
+		SDL_GetWindowSizeInPixels(m_window, &width, &height);
+
+		m_device.waitIdle();
+
+		cleanup_swapchain();
+
+		create_swapchain();
+		create_image_views();
+	}
+
+	void Application::cleanup_swapchain()
+	{
+		m_swapchain_image_views.clear();
+		m_swapchain = nullptr;
 	}
 
 	std::vector<const char*> Application::get_required_instance_extensions()
@@ -583,7 +649,9 @@ namespace mv
 
 	void Application::record_command_buffer(uint32_t image_index)
 	{
-		m_command_buffer.begin({});
+		auto& command_buffer = m_command_buffers[m_frame_index];
+
+		command_buffer.begin({});
 
 		transition_image_layout(
 			image_index,
@@ -613,16 +681,16 @@ namespace mv
 			.pColorAttachments = &attachment_info
 		};
 
-		m_command_buffer.beginRendering(rendering_info);
+		command_buffer.beginRendering(rendering_info);
 
-		m_command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphics_pipeline);
+		command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphics_pipeline);
 
-		m_command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<uint32_t>(m_swapchain_extent.width), static_cast<uint32_t>(m_swapchain_extent.height), 0.0f, 1.0f));
-		m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_swapchain_extent));
+		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<uint32_t>(m_swapchain_extent.width), static_cast<uint32_t>(m_swapchain_extent.height), 0.0f, 1.0f));
+		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_swapchain_extent));
 
-		m_command_buffer.draw(3, 1, 0, 0);
+		command_buffer.draw(3, 1, 0, 0);
 
-		m_command_buffer.endRendering();
+		command_buffer.endRendering();
 
 		transition_image_layout(
 			image_index,
@@ -634,7 +702,7 @@ namespace mv
 			vk::PipelineStageFlagBits2::eBottomOfPipe               
 		);
 
-		m_command_buffer.end();
+		command_buffer.end();
 
 	}
 
@@ -666,7 +734,7 @@ namespace mv
 			.pImageMemoryBarriers = &barrier 
 		};
 
-		m_command_buffer.pipelineBarrier2(dependency_info);
+		m_command_buffers[m_frame_index].pipelineBarrier2(dependency_info);
 	}
 
 	static VKAPI_ATTR vk::Bool32 VKAPI_CALL debug_callback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void*)
