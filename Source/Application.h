@@ -1,6 +1,8 @@
 #pragma once
+
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
+#include <stb_image.h> 
 #include <SDL3/SDL.h>
 #include <vector>
 #include <array>
@@ -11,9 +13,10 @@ namespace mv
 	{
 		glm::vec2 position;
 		glm::vec3 color;
+		glm::vec2 tex_coord;
 
 		static vk::VertexInputBindingDescription get_binding_description();
-		static std::array<vk::VertexInputAttributeDescription, 2> get_attribute_descriptions();
+		static std::array<vk::VertexInputAttributeDescription, 3> get_attribute_descriptions();
 	};
 
 	struct UniformBufferObject 
@@ -67,6 +70,9 @@ namespace mv
 		void create_descriptor_set_layout();
 		void create_graphics_pipeline();
 		void create_command_pool();
+		void create_texture_image();
+		void create_texture_image_view();
+		void create_texture_sampler();
 		void create_vertex_buffer();
 		void create_index_buffer();
 		void create_uniform_buffers();
@@ -87,9 +93,16 @@ namespace mv
 		[[nodiscard]] vk::raii::ShaderModule create_shader_module(const std::vector<char>& code) const;
 		void record_command_buffer(uint32_t image_index);
 		void transition_image_layout(uint32_t image_index, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask);
+		void transition_image_layout(const vk::raii::Image& image, vk::ImageLayout old_layout, vk::ImageLayout new_layout);
 		uint32_t find_memory_type(uint32_t type_filter, vk::MemoryPropertyFlags properties);
 		void create_buffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags propoerties, vk::raii::Buffer& buffer, vk::raii::DeviceMemory& memory);
 		void copy_buffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
+		void copy_buffer_to_image(const vk::raii::Buffer& buffer, vk::raii::Image& image, uint32_t width, uint32_t height);
+		void create_image(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Image& image, vk::raii::DeviceMemory& image_memory);
+		vk::raii::ImageView create_image_view(vk::raii::Image& image, vk::Format format);
+		vk::raii::CommandBuffer begin_single_time_commands();
+		void end_single_time_commands(vk::raii::CommandBuffer& command_buffer);
+
 
 		bool m_running{ false };
 		bool m_framebuffer_resized{ false };
@@ -128,10 +141,10 @@ namespace mv
 
 
 		const std::vector<Vertex> m_vertices = {
-			{ {-0.5f,-0.5f }, { 1.0f, 0.0f, 0.0f } },
-			{ { 0.5f,-0.5f }, { 0.0f, 1.0f, 0.0f } },
-			{ { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
-			{ {-0.5f, 0.5f }, { 1.0f, 1.0f, 1.0f } }
+			{ {-0.5f,-0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+			{ { 0.5f,-0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+			{ { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+			{ {-0.5f, 0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
 		};
 
 		const std::vector<uint16_t> m_indices = {
@@ -142,10 +155,15 @@ namespace mv
 		vk::raii::Buffer m_index_buffer{ nullptr };
 		vk::raii::DeviceMemory m_vertex_memory{ nullptr };
 		vk::raii::DeviceMemory m_index_memory{ nullptr };
+		vk::raii::Image m_texture_image{ nullptr };
+		vk::raii::DeviceMemory m_texture_memory{ nullptr };
+		vk::raii::ImageView m_texture_image_view{ nullptr };
+		vk::raii::Sampler m_texture_sampler{ nullptr };
 		
 		std::vector<vk::raii::Buffer> m_uniform_buffers;
 		std::vector<vk::raii::DeviceMemory> m_uniform_buffers_memory;
 		std::vector<void*> m_uniform_buffers_mapped;
+
 
 	}; // class Application
 

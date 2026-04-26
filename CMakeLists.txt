@@ -58,8 +58,8 @@ add_dependencies(${PROJECT_NAME} CompileShaders)
 add_custom_command(
     TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory 
-        "${SHADER_INTERMEDIATE_DIR}" 
+        "${CMAKE_SOURCE_DIR}/Assets" 
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMENT "Movendo shaders (.spv) compilados para o diretório do executável..."
+    COMMENT "Movendo tetures para o diretório do executável..."
     VERBATIM
 )
