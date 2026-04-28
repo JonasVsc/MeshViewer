@@ -8,6 +8,7 @@ project("MeshViewer"
 set(CMAKE_CXX_STANDARD 20)
 
 add_subdirectory(ThirdParty/SDL)
+add_subdirectory(ThirdParty/tinyobjloader)
 
 find_package(Vulkan REQUIRED)
 find_program(SLANGC_EXECUTABLE slangc REQUIRED)
@@ -22,6 +23,7 @@ target_link_libraries(${PROJECT_NAME}
     PRIVATE
         SDL3::SDL3
         Vulkan::Vulkan
+        tinyobjloader
 )
 
 target_compile_definitions(${PROJECT_NAME} 
@@ -29,6 +31,7 @@ target_compile_definitions(${PROJECT_NAME}
         VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
         VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
         GLM_FORCE_DEPTH_ZERO_TO_ONE=1
+        GLM_ENABLE_EXPERIMENTAL=1
 )
 
 file(GLOB_RECURSE SHADER_SOURCES "Assets/Shaders/*.slang")

@@ -2,10 +2,13 @@
 
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
-#include <stb_image.h> 
+#include <glm/gtx/hash.hpp>
+#include <stb_image.h>
+#include <tiny_obj_loader.h>
 #include <SDL3/SDL.h>
 #include <vector>
 #include <array>
+#include <unordered_map>
 
 namespace mv
 {
@@ -17,6 +20,11 @@ namespace mv
 
 		static vk::VertexInputBindingDescription get_binding_description();
 		static std::array<vk::VertexInputAttributeDescription, 3> get_attribute_descriptions();
+
+		bool operator==(const Vertex& other) const
+		{
+			return position == other.position && color == other.color && tex_coord == other.tex_coord;
+		}
 	};
 
 	struct UniformBufferObject 
@@ -74,6 +82,7 @@ namespace mv
 		void create_texture_image();
 		void create_texture_image_view();
 		void create_texture_sampler();
+		void load_model();
 		void create_vertex_buffer();
 		void create_index_buffer();
 		void create_uniform_buffers();
@@ -84,6 +93,7 @@ namespace mv
 		void recreate_swapchain();
 		void cleanup_swapchain();
 		void update_uniform_buffer(uint32_t current_image);
+		void record_command_buffer(uint32_t image_index);
 
 		std::vector<const char*> get_required_instance_extensions();
 		bool is_device_suitable(const vk::raii::PhysicalDevice& physical_device);
@@ -92,7 +102,6 @@ namespace mv
 		vk::Extent2D choose_swap_extent(const vk::SurfaceCapabilitiesKHR& capabilities);
 		uint32_t choose_swap_min_image_count(const vk::SurfaceCapabilitiesKHR& capabilities);
 		[[nodiscard]] vk::raii::ShaderModule create_shader_module(const std::vector<char>& code) const;
-		void record_command_buffer(uint32_t image_index);
 		void transition_image_layout(vk::Image image, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask, vk::ImageAspectFlags image_aspect_flags);
 		void transition_image_layout(const vk::raii::Image& image, vk::ImageLayout old_layout, vk::ImageLayout new_layout);
 		uint32_t find_memory_type(uint32_t type_filter, vk::MemoryPropertyFlags properties);
@@ -144,27 +153,13 @@ namespace mv
 		uint32_t m_frame_index{ 0 };
 
 
-		const std::vector<Vertex> m_vertices = {
-			{ {-0.5f,-0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-			{ { 0.5f,-0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-			{ { 0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-			{ {-0.5f, 0.5f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
-
-			{ {-0.5f,-0.5f,-0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-			{ { 0.5f,-0.5f,-0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-			{ { 0.5f, 0.5f,-0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-			{ {-0.5f, 0.5f,-0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
-		};
-
-		const std::vector<uint16_t> m_indices = {
-			0, 1, 2, 2, 3, 0,
-			4, 5, 6, 6, 7, 4
-		};
-
+		std::vector<Vertex> m_vertices;
+		std::vector<uint32_t> m_indices;
 		vk::raii::Buffer m_vertex_buffer{ nullptr };
 		vk::raii::Buffer m_index_buffer{ nullptr };
 		vk::raii::DeviceMemory m_vertex_memory{ nullptr };
 		vk::raii::DeviceMemory m_index_memory{ nullptr };
+		
 		vk::raii::Image m_texture_image{ nullptr };
 		vk::raii::DeviceMemory m_texture_memory{ nullptr };
 		vk::raii::ImageView m_texture_image_view{ nullptr };
@@ -181,3 +176,16 @@ namespace mv
 	}; // class Application
 
 } // namespace mv
+
+namespace std
+{
+	template<> struct hash<mv::Vertex>
+	{
+		size_t operator()(mv::Vertex const& vertex) const
+		{
+			return ((hash<glm::vec3>()(vertex.position) ^
+				(hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+				(hash<glm::vec2>()(vertex.tex_coord) << 1);
+		}
+	};
+} // namespace std

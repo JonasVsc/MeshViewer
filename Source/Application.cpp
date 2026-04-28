@@ -1,6 +1,8 @@
 #include "Application.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h> 
+
 #include <glm/gtc/matrix_transform.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <iostream>
@@ -67,6 +69,7 @@ namespace mv
 		create_texture_image();
 		create_texture_image_view();
 		create_texture_sampler();
+		load_model();
 		create_vertex_buffer();
 		create_index_buffer();
 		create_uniform_buffers();
@@ -544,7 +547,7 @@ namespace mv
 	void Application::create_texture_image()
 	{
 		int tex_width, tex_height, tex_channels;
-		stbi_uc* pixels = stbi_load("Textures/texture.jpg", &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
+		stbi_uc* pixels = stbi_load("Textures/viking_room.png", &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
 		vk::DeviceSize image_size = tex_width * tex_height * 4;
 
 		if (!pixels)
@@ -601,6 +604,51 @@ namespace mv
 		};
 
 		m_texture_sampler = vk::raii::Sampler(m_device, sampler_ci);
+	}
+
+	void Application::load_model()
+	{
+		tinyobj::attrib_t attrib;
+		std::vector<tinyobj::shape_t> shapes;
+		std::vector<tinyobj::material_t> materials;
+		std::string warn, err;
+
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "Models/viking_room.obj"))
+		{
+			throw std::runtime_error(warn + err);
+		}
+
+		std::unordered_map<Vertex, uint32_t> unique_vertices{};
+
+		for (const auto& shape : shapes)
+		{
+			for (const auto& index : shape.mesh.indices)
+			{
+				Vertex vertex{};
+
+				vertex.position = {
+					attrib.vertices[3 * index.vertex_index + 0],
+					attrib.vertices[3 * index.vertex_index + 1],
+					attrib.vertices[3 * index.vertex_index + 2]
+				};
+
+				vertex.tex_coord = {
+					attrib.texcoords[2 * index.texcoord_index + 0],
+					1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+				};
+
+				vertex.color = { 1.0f, 1.0f, 1.0f };
+
+				if (!unique_vertices.contains(vertex))
+				{
+					unique_vertices[vertex] = static_cast<uint32_t>(m_vertices.size());
+					m_vertices.push_back(vertex);
+				}
+
+				m_vertices.push_back(vertex);
+				m_indices.push_back(unique_vertices[vertex]);
+			}
+		}
 	}
 
 	void Application::create_vertex_buffer()
@@ -773,7 +821,7 @@ namespace mv
 		float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
 
 		UniformBufferObject ubo{};
-		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.model = glm::mat4(1.0f);
 		ubo.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(m_swapchain_extent.width) / static_cast<float>(m_swapchain_extent.height), 0.1f, 10.0f);
 		ubo.proj[1][1] *= -1;
@@ -965,7 +1013,7 @@ namespace mv
 		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), m_swapchain_extent));
 
 		command_buffer.bindVertexBuffers(0, *m_vertex_buffer, { 0 });
-		command_buffer.bindIndexBuffer(*m_index_buffer, 0, vk::IndexType::eUint16);
+		command_buffer.bindIndexBuffer(*m_index_buffer, 0, vk::IndexType::eUint32);
 
 		command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_pipeline_layout, 0, *m_descriptor_sets[m_frame_index], nullptr);
 
