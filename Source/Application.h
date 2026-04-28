@@ -11,7 +11,7 @@ namespace mv
 {
 	struct Vertex
 	{
-		glm::vec2 position;
+		glm::vec3 position;
 		glm::vec3 color;
 		glm::vec2 tex_coord;
 
@@ -70,6 +70,7 @@ namespace mv
 		void create_descriptor_set_layout();
 		void create_graphics_pipeline();
 		void create_command_pool();
+		void create_depth_resources();
 		void create_texture_image();
 		void create_texture_image_view();
 		void create_texture_sampler();
@@ -92,14 +93,17 @@ namespace mv
 		uint32_t choose_swap_min_image_count(const vk::SurfaceCapabilitiesKHR& capabilities);
 		[[nodiscard]] vk::raii::ShaderModule create_shader_module(const std::vector<char>& code) const;
 		void record_command_buffer(uint32_t image_index);
-		void transition_image_layout(uint32_t image_index, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask);
+		void transition_image_layout(vk::Image image, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask, vk::ImageAspectFlags image_aspect_flags);
 		void transition_image_layout(const vk::raii::Image& image, vk::ImageLayout old_layout, vk::ImageLayout new_layout);
 		uint32_t find_memory_type(uint32_t type_filter, vk::MemoryPropertyFlags properties);
+		vk::Format find_supported_format(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlagBits features);
+		vk::Format find_depth_format();
+		bool has_stencil_component(vk::Format format);
 		void create_buffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags propoerties, vk::raii::Buffer& buffer, vk::raii::DeviceMemory& memory);
 		void copy_buffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
 		void copy_buffer_to_image(const vk::raii::Buffer& buffer, vk::raii::Image& image, uint32_t width, uint32_t height);
 		void create_image(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Image& image, vk::raii::DeviceMemory& image_memory);
-		vk::raii::ImageView create_image_view(vk::raii::Image& image, vk::Format format);
+		vk::raii::ImageView create_image_view(vk::raii::Image& image, vk::Format format, vk::ImageAspectFlags aspect_flags);
 		vk::raii::CommandBuffer begin_single_time_commands();
 		void end_single_time_commands(vk::raii::CommandBuffer& command_buffer);
 
@@ -141,14 +145,20 @@ namespace mv
 
 
 		const std::vector<Vertex> m_vertices = {
-			{ {-0.5f,-0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-			{ { 0.5f,-0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-			{ { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-			{ {-0.5f, 0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
+			{ {-0.5f,-0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+			{ { 0.5f,-0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+			{ { 0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+			{ {-0.5f, 0.5f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
+
+			{ {-0.5f,-0.5f,-0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+			{ { 0.5f,-0.5f,-0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+			{ { 0.5f, 0.5f,-0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+			{ {-0.5f, 0.5f,-0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
 		};
 
 		const std::vector<uint16_t> m_indices = {
-			0, 1, 2, 2, 3, 0
+			0, 1, 2, 2, 3, 0,
+			4, 5, 6, 6, 7, 4
 		};
 
 		vk::raii::Buffer m_vertex_buffer{ nullptr };
@@ -164,6 +174,9 @@ namespace mv
 		std::vector<vk::raii::DeviceMemory> m_uniform_buffers_memory;
 		std::vector<void*> m_uniform_buffers_mapped;
 
+		vk::raii::Image m_depth_image{ nullptr };
+		vk::raii::DeviceMemory m_depth_image_memory{ nullptr };
+		vk::raii::ImageView m_depth_image_view{ nullptr };
 
 	}; // class Application
 

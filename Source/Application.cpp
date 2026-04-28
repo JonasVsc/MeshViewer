@@ -63,6 +63,7 @@ namespace mv
 		create_descriptor_set_layout();
 		create_graphics_pipeline();
 		create_command_pool();
+		create_depth_resources();
 		create_texture_image();
 		create_texture_image_view();
 		create_texture_sampler();
@@ -462,6 +463,16 @@ namespace mv
 		// multisampling
 		vk::PipelineMultisampleStateCreateInfo pipeline_multisampling{ .rasterizationSamples = vk::SampleCountFlagBits::e1, .sampleShadingEnable = vk::False };
 	
+		// depth stencil
+		vk::PipelineDepthStencilStateCreateInfo pipeline_depth_stencil
+		{
+			.depthTestEnable = vk::True,
+			.depthWriteEnable = vk::True,
+			.depthCompareOp = vk::CompareOp::eLess,
+			.depthBoundsTestEnable = vk::False,
+			.stencilTestEnable = vk::False,
+		};
+
 		// color blending
 		vk::PipelineColorBlendAttachmentState color_blend_attachment
 		{
@@ -476,10 +487,12 @@ namespace mv
 		};
 
 		vk::PipelineColorBlendStateCreateInfo pipeline_color_blending{ .logicOpEnable = vk::False, .logicOp = vk::LogicOp::eCopy, .attachmentCount = 1, .pAttachments = &color_blend_attachment };
-	
+
 		// pipeline layout
 		vk::PipelineLayoutCreateInfo layout_ci{ .setLayoutCount = 1, .pSetLayouts = &*m_descriptor_set_layout };
 		m_pipeline_layout = vk::raii::PipelineLayout(m_device, layout_ci);
+
+		vk::Format depth_format = find_depth_format();
 
 		vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipeline_chain_ci
 		{
@@ -491,12 +504,13 @@ namespace mv
 				.pViewportState = &pipeline_viewport,
 				.pRasterizationState = &pipeline_rasterizer,
 				.pMultisampleState = &pipeline_multisampling,
+				.pDepthStencilState = &pipeline_depth_stencil,
 				.pColorBlendState = &pipeline_color_blending,
 				.pDynamicState = &pipeline_dynamic_state,
 				.layout = m_pipeline_layout,
-				.renderPass = nullptr
+				.renderPass = nullptr,
 			},
-			{ .colorAttachmentCount = 1, .pColorAttachmentFormats = &m_swapchain_surface_format.format }
+			{ .colorAttachmentCount = 1, .pColorAttachmentFormats = &m_swapchain_surface_format.format, .depthAttachmentFormat = depth_format }
 		};
 
 		m_graphics_pipeline = vk::raii::Pipeline(m_device, nullptr, pipeline_chain_ci.get<vk::GraphicsPipelineCreateInfo>());
@@ -511,6 +525,20 @@ namespace mv
 		};
 
 		m_command_pool = vk::raii::CommandPool(m_device, cmd_pool_ci);
+	}
+
+	void Application::create_depth_resources()
+	{
+		vk::Format depth_format = find_depth_format();
+
+		create_image(
+			m_swapchain_extent.width, m_swapchain_extent.height, depth_format,
+			vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eDepthStencilAttachment,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			m_depth_image, m_depth_image_memory
+		);
+
+		m_depth_image_view = create_image_view(m_depth_image, depth_format, vk::ImageAspectFlagBits::eDepth);
 	}
 
 	void Application::create_texture_image()
@@ -555,7 +583,7 @@ namespace mv
 
 	void Application::create_texture_image_view()
 	{
-		m_texture_image_view = create_image_view(m_texture_image, vk::Format::eR8G8B8A8Srgb);
+		m_texture_image_view = create_image_view(m_texture_image, vk::Format::eR8G8B8A8Srgb, vk::ImageAspectFlagBits::eColor);
 	}
 
 	void Application::create_texture_sampler()
@@ -729,6 +757,7 @@ namespace mv
 
 		create_swapchain();
 		create_image_views();
+		create_depth_resources();
 	}
 
 	void Application::cleanup_swapchain()
@@ -877,17 +906,31 @@ namespace mv
 		command_buffer.begin({});
 
 		transition_image_layout(
-			image_index,
+			m_swapchain_images[image_index],
 			vk::ImageLayout::eUndefined,
 			vk::ImageLayout::eColorAttachmentOptimal,
 			{},
 			vk::AccessFlagBits2::eColorAttachmentWrite,
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::ImageAspectFlagBits::eColor
+		);
+
+		transition_image_layout(
+			m_depth_image,
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eDepthAttachmentOptimal,
+			vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+			vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+			vk::ImageAspectFlagBits::eDepth
 		);
 
 		vk::ClearValue clear_color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
-		vk::RenderingAttachmentInfo attachment_info
+		vk::ClearValue clear_depth = vk::ClearDepthStencilValue(1.0f, 0);
+
+		vk::RenderingAttachmentInfo color_attachment_info
 		{
 			.imageView = m_swapchain_image_views[image_index],
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
@@ -896,12 +939,22 @@ namespace mv
 			.clearValue = clear_color
 		};
 
+		vk::RenderingAttachmentInfo depth_attachment_info
+		{
+			.imageView = m_depth_image_view,
+			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eStore,
+			.clearValue = clear_depth
+		};
+
 		vk::RenderingInfo rendering_info
 		{
 			.renderArea = { .offset = {0,0}, .extent = m_swapchain_extent },
 			.layerCount = 1,
 			.colorAttachmentCount = 1,
-			.pColorAttachments = &attachment_info
+			.pColorAttachments = &color_attachment_info,
+			.pDepthAttachment = &depth_attachment_info
 		};
 
 		command_buffer.beginRendering(rendering_info);
@@ -921,20 +974,21 @@ namespace mv
 		command_buffer.endRendering();
 
 		transition_image_layout(
-			image_index,
+			m_swapchain_images[image_index],
 			vk::ImageLayout::eColorAttachmentOptimal,
 			vk::ImageLayout::ePresentSrcKHR,
 			vk::AccessFlagBits2::eColorAttachmentWrite,             
 			{},                                                     
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput,     
-			vk::PipelineStageFlagBits2::eBottomOfPipe               
+			vk::PipelineStageFlagBits2::eBottomOfPipe,
+			vk::ImageAspectFlagBits::eColor
 		);
 
 		command_buffer.end();
 
 	}
 
-	void Application::transition_image_layout(uint32_t image_index, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask)
+	void Application::transition_image_layout(vk::Image image, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask, vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask, vk::ImageAspectFlags image_aspect_flags)
 	{
 		vk::ImageMemoryBarrier2 barrier = 
 		{
@@ -946,9 +1000,9 @@ namespace mv
 			.newLayout = new_layout,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_swapchain_images[image_index],
+			.image = image,
 			.subresourceRange = {
-				   .aspectMask = vk::ImageAspectFlagBits::eColor,
+				   .aspectMask = image_aspect_flags,
 				   .baseMipLevel = 0,
 				   .levelCount = 1,
 				   .baseArrayLayer = 0,
@@ -1018,6 +1072,39 @@ namespace mv
 		}
 
 		throw std::runtime_error("failed to find suitable memory type");
+	}
+
+	vk::Format Application::find_supported_format(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlagBits features)
+	{
+		for(const auto format : candidates)
+		{
+			vk::FormatProperties props = m_physical_device.getFormatProperties(format);
+
+			if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) 
+			{
+				return format;
+			}
+			if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) 
+			{
+				return format;
+			}
+		}
+
+		throw std::runtime_error("failed to find supported format");
+	}
+
+	vk::Format Application::find_depth_format()
+	{
+		return find_supported_format(
+			{ vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
+			vk::ImageTiling::eOptimal,
+			vk::FormatFeatureFlagBits::eDepthStencilAttachment
+		);
+	}
+
+	bool Application::has_stencil_component(vk::Format format)
+	{
+		return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
 	}
 
 	void Application::create_buffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer& buffer, vk::raii::DeviceMemory& memory)
@@ -1095,14 +1182,14 @@ namespace mv
 		image.bindMemory(image_memory, 0);
 	}
 
-	vk::raii::ImageView Application::create_image_view(vk::raii::Image& image, vk::Format format)
+	vk::raii::ImageView Application::create_image_view(vk::raii::Image& image, vk::Format format, vk::ImageAspectFlags aspect_flags)
 	{
 		vk::ImageViewCreateInfo view_ci
 		{
 			.image = image, 
 			.viewType = vk::ImageViewType::e2D, 
 			.format = format, 
-			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+			.subresourceRange = { aspect_flags, 0, 1, 0, 1 }
 		};
 
 		return vk::raii::ImageView(m_device, view_ci);
@@ -1146,7 +1233,7 @@ namespace mv
 	std::array<vk::VertexInputAttributeDescription, 3> Vertex::get_attribute_descriptions()
 	{
 		return {{
-			{ .location = 0, .binding = 0, .format = vk::Format::eR32G32Sfloat,    .offset = offsetof(Vertex, position) },
+			{ .location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat,    .offset = offsetof(Vertex, position) },
 			{ .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color) },
 			{ .location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat,    .offset = offsetof(Vertex, tex_coord) },
 		}};

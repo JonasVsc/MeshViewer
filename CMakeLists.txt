@@ -28,6 +28,7 @@ target_compile_definitions(${PROJECT_NAME}
     PUBLIC
         VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
         VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
+        GLM_FORCE_DEPTH_ZERO_TO_ONE=1
 )
 
 file(GLOB_RECURSE SHADER_SOURCES "Assets/Shaders/*.slang")
