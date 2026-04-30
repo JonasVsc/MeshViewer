@@ -1,3 +1,9 @@
 [submodule "ThirdParty/SDL"]
 	path = ThirdParty/SDL
 	url = https://github.com/libsdl-org/SDL.git
+[submodule "ThirdParty/tinygltf"]
+	path = ThirdParty/tinygltf
+	url = https://github.com/syoyo/tinygltf.git
+[submodule "ThirdParty/KTX-Software"]
+	path = ThirdParty/KTX-Software
+	url = https://github.com/KhronosGroup/KTX-Software.git
